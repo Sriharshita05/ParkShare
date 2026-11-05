@@ -4,13 +4,14 @@ import { env } from './config/env.js'
 import { connectDb, mongoose } from './db/connect.js'
 import User from './models/User.js'
 import authRoutes from './routes/auth.js'
+import chatRoutes from './routes/chat.js' // added: chatbot route
 
 const app = express()
 app.disable('x-powered-by')
 // Behind a hosting proxy (Render, Railway...) this makes rate limiting see the real client IP.
 if (process.env.TRUST_PROXY) app.set('trust proxy', Number(process.env.TRUST_PROXY))
 app.use(cors({ origin: env.clientOrigin.split(','), methods: ['GET', 'POST'] }))
-app.use(express.json({ limit: '10kb' }))
+app.use(express.json({ limit: '50kb' })) // changed from 10kb so chat history fits
 
 app.get('/api/health', (_req, res) => {
   const up = mongoose.connection.readyState === 1
@@ -18,6 +19,7 @@ app.get('/api/health', (_req, res) => {
 })
 
 app.use('/api/auth', authRoutes)
+app.use('/api/chat', chatRoutes) // added: chatbot route
 
 app.use((_req, res) => res.status(404).json({ detail: 'Not found.' }))
 // eslint-disable-next-line no-unused-vars
