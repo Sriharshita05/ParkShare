@@ -26,11 +26,32 @@ function UserChip({ user, onLogout }) {
   )
 }
 
-const links = [
-  { to: '/find', label: 'Find Parking' },
-  { to: '/owner', label: 'List Your Space' },
-  { to: '/active', label: 'My Parking' },
-]
+// Links depend on who is logged in, so nobody is sent to a page their role cannot open.
+function linksFor(user) {
+  if (!user) {
+    return [
+      { to: '/find', label: 'Find Parking' },
+      { to: '/auth?mode=signup', label: 'List Your Space' },
+    ]
+  }
+  if (user.role === 'admin') {
+    return [
+      { to: '/find', label: 'Find Parking' },
+      { to: '/owner', label: 'Dashboard' },
+    ]
+  }
+  if (user.role === 'owner') {
+    return [
+      { to: '/find', label: 'Find Parking' },
+      { to: '/owner', label: 'My Dashboard' },
+      { to: '/bookings', label: 'My Bookings' },
+    ]
+  }
+  return [
+    { to: '/find', label: 'Find Parking' },
+    { to: '/bookings', label: 'My Bookings' },
+  ]
+}
 
 export default function Navbar() {
   const [open, setOpen] = useState(false)
@@ -38,6 +59,7 @@ export default function Navbar() {
   const { pathname } = useLocation()
   const { user, signOut } = useAuth()
   const navigate = useNavigate()
+  const links = linksFor(user)
   const logout = () => {
     signOut()
     navigate('/auth')

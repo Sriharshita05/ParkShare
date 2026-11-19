@@ -4,13 +4,19 @@ import { env } from './config/env.js'
 import { connectDb, mongoose } from './db/connect.js'
 import User from './models/User.js'
 import authRoutes from './routes/auth.js'
-import chatRoutes from './routes/chat.js' // added: chatbot route
+import otpRoutes from './routes/otp.js'
+import chatRoutes from './routes/chat.js'
+import spaceRoutes from './routes/spaces.js'
+import bookingRoutes from './routes/bookings.js'
+import ownerRoutes from './routes/owner.js'
+import { requireVerifiedEmail } from './middleware/requireVerifiedEmail.js'
 
 const app = express()
 app.disable('x-powered-by')
 // Behind a hosting proxy (Render, Railway...) this makes rate limiting see the real client IP.
 if (process.env.TRUST_PROXY) app.set('trust proxy', Number(process.env.TRUST_PROXY))
-app.use(cors({ origin: env.clientOrigin.split(','), methods: ['GET', 'POST'] }))
+// PATCH and DELETE are needed for editing and deleting spaces; without them the browser blocks those requests.
+app.use(cors({ origin: env.clientOrigin.split(','), methods: ['GET', 'POST', 'PATCH', 'DELETE'] }))
 app.use(express.json({ limit: '50kb' })) // changed from 10kb so chat history fits
 
 app.get('/api/health', (_req, res) => {
@@ -18,8 +24,17 @@ app.get('/api/health', (_req, res) => {
   res.status(up ? 200 : 503).json({ status: up ? 'ok' : 'database unavailable' })
 })
 
+// Signup email verification. Order matters:
+//  1. /api/auth/send-otp and /api/auth/verify-otp
+//  2. the gate that blocks POST /api/auth/register unless the email was verified
+//  3. your existing auth routes (login, register, ...)
+app.use('/api/auth', otpRoutes)
+app.post('/api/auth/register', requireVerifiedEmail)
 app.use('/api/auth', authRoutes)
-app.use('/api/chat', chatRoutes) // added: chatbot route
+app.use('/api/chat', chatRoutes)
+app.use('/api/spaces', spaceRoutes)
+app.use('/api/bookings', bookingRoutes)
+app.use('/api/owner', ownerRoutes)
 
 app.use((_req, res) => res.status(404).json({ detail: 'Not found.' }))
 // eslint-disable-next-line no-unused-vars

@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowRight, ArrowLeft, Car, Check, Eye, EyeOff, Globe, Home, Lock, Mail, User } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { ArrowRight, ArrowLeft, Car, Check, CheckCircle2, Eye, EyeOff, Globe, Home, Loader2, Lock, Mail, Send, User } from 'lucide-react'
 import AuthShell from '../components/auth/AuthShell'
 import FormField from '../components/auth/FormField'
 import PasswordStrength from '../components/auth/PasswordStrength'
 import AuthNotice from '../components/auth/AuthNotice'
+import OtpInput from '../components/auth/OtpInput'
 import Button from '../components/ui/Button'
 import { homeFor, useAuth } from '../context/AuthContext'
-import { login, register, requestPasswordReset } from '../services/api'
+import { login, register, requestPasswordReset, sendSignupOtp, verifySignupOtp } from '../services/api'
 import { validateEmail, validateName, validatePassword } from '../utils/validation'
 
 const COPY = {
@@ -21,17 +22,23 @@ const FIELDS = { login: ['email', 'password'], signup: ['name', 'email', 'passwo
 // Staggered entrance; the global reduced-motion rule neutralises it for users who opt out.
 const enter = (i) => ({ animationDelay: `${80 + i * 60}ms` })
 
+const formatCountdown = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+
 export default function Auth() {
   const [params] = useSearchParams()
   const requested = params.get('mode')
   const mode = requested === 'signup' || requested === 'forgot' ? requested : 'login'
   const navigate = useNavigate()
+  const location = useLocation()
+  // Page the visitor wanted before being sent to login (set by ProtectedRoute / the Book button).
+  // Internal paths only.
+  const from = typeof location.state?.from === 'string' && location.state.from.startsWith('/') ? location.state.from : null
   const { user: currentUser, signIn } = useAuth()
 
   // Already logged in: skip the form.
   useEffect(() => {
-    if (currentUser) navigate(homeFor(currentUser), { replace: true })
-  }, [currentUser, navigate])
+    if (currentUser) navigate(from || homeFor(currentUser), { replace: true })
+  }, [currentUser, navigate, from])
 
   const [values, setValues] = useState({ name: '', email: '', password: '', remember: false, role: 'driver' })
   const [touched, setTouched] = useState({})
@@ -40,14 +47,41 @@ export default function Auth() {
   const [loading, setLoading] = useState(false)
   const [notice, setNotice] = useState(null)
 
+  // Email verification (signup only): idle -> sent -> verified
+  const [otp, setOtp] = useState('')
+  const [otpStage, setOtpStage] = useState('idle')
+  const [otpBusy, setOtpBusy] = useState('') // '' | 'send' | 'verify'
+  const [otpMsg, setOtpMsg] = useState(null) // { tone: 'success' | 'error', text }
+  const [cooldown, setCooldown] = useState(0)
+  const [verificationToken, setVerificationToken] = useState('')
+  const otpRun = useRef(0) // bumped on every reset so late responses for an old email are ignored
+
+  const resetOtp = useCallback(() => {
+    otpRun.current += 1
+    setOtp('')
+    setOtpStage('idle')
+    setOtpBusy('')
+    setOtpMsg(null)
+    setCooldown(0)
+    setVerificationToken('')
+  }, [])
+
+  // Resend countdown.
+  useEffect(() => {
+    if (cooldown <= 0) return undefined
+    const t = setTimeout(() => setCooldown((c) => Math.max(0, c - 1)), 1000)
+    return () => clearTimeout(t)
+  }, [cooldown])
+
   // Reset transient state when switching between login / signup / forgot.
   useEffect(() => {
+    resetOtp()
     setTouched({})
     setSubmitted(false)
     setNotice(null)
     setShowPassword(false)
     setValues((v) => ({ ...v, password: '' }))
-  }, [mode])
+  }, [mode, resetOtp])
 
   const errors = useMemo(
     () => ({
@@ -62,6 +96,61 @@ export default function Auth() {
   const set = (key) => (e) => setValues((v) => ({ ...v, [key]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }))
   const blur = (key) => () => setTouched((t) => ({ ...t, [key]: true }))
 
+  // Changing the email after requesting an OTP invalidates that OTP.
+  const onEmailChange = (e) => {
+    if (mode === 'signup') resetOtp() // also drops an in-flight request and any old error
+    set('email')(e)
+  }
+
+  const sendOtp = async () => {
+    setTouched((t) => ({ ...t, email: true }))
+    if (errors.email) {
+      document.getElementById('email')?.focus()
+      return
+    }
+    const run = otpRun.current
+    setOtpBusy('send')
+    setOtpMsg(null)
+    try {
+      const res = await sendSignupOtp({ email: values.email.trim() })
+      if (run !== otpRun.current) return
+      setOtp('')
+      setOtpStage('sent')
+      setCooldown(Number(res?.resendAfter) || 45)
+      setOtpMsg({ tone: 'success', text: res?.message || 'OTP sent successfully to your email.' })
+    } catch (err) {
+      if (run !== otpRun.current) return
+      // "Please wait 23 seconds..." -> keep the visible timer in step with the server.
+      const wait = Number(/wait (\d+) second/i.exec(err.message || '')?.[1])
+      if (wait) setCooldown(wait)
+      setOtpMsg({ tone: 'error', text: err.message || 'Could not send the OTP. Please try again.' })
+    } finally {
+      if (run === otpRun.current) setOtpBusy('')
+    }
+  }
+
+  const verifyOtp = async () => {
+    if (otp.length !== 6 || otpBusy) return
+    const run = otpRun.current
+    setOtpBusy('verify')
+    setOtpMsg(null)
+    try {
+      const res = await verifySignupOtp({ email: values.email.trim(), otp })
+      if (run !== otpRun.current) return
+      setVerificationToken(res.verificationToken)
+      setOtpStage('verified')
+      setCooldown(0)
+      setNotice(null)
+    } catch (err) {
+      if (run !== otpRun.current) return
+      setOtpMsg({ tone: 'error', text: err.message || 'Could not verify the OTP. Please try again.' })
+      setOtp('')
+      document.getElementById('otp-0')?.focus()
+    } finally {
+      if (run === otpRun.current) setOtpBusy('')
+    }
+  }
+
   const onSubmit = async (e) => {
     e.preventDefault()
     setSubmitted(true)
@@ -71,6 +160,10 @@ export default function Auth() {
     if (firstInvalid) {
       setNotice({ tone: 'error', text: 'Please fix the highlighted fields and try again.' })
       document.getElementById(firstInvalid)?.focus()
+      return
+    }
+    if (mode === 'signup' && (otpStage !== 'verified' || !verificationToken)) {
+      setNotice({ tone: 'error', text: 'Please verify your email with the OTP before creating your account.' })
       return
     }
 
@@ -84,12 +177,18 @@ export default function Auth() {
       }
       const result =
         mode === 'signup'
-          ? await register({ name: values.name.trim(), email, password: values.password, role: values.role })
+          ? await register({ name: values.name.trim(), email, password: values.password, role: values.role, verificationToken })
           : await login({ email, password: values.password, remember: values.remember })
       signIn(result, mode === 'login' ? values.remember : false)
-      navigate(homeFor(result.user), { replace: true })
+      navigate(from || homeFor(result.user), { replace: true })
     } catch (err) {
-      setNotice({ tone: 'error', text: err.message || 'Something went wrong. Please try again.' })
+      // 403 on signup: the server no longer accepts the email verification (expired or already used).
+      if (mode === 'signup' && err.status === 403) {
+        resetOtp()
+        setNotice({ tone: 'error', text: err.message || 'Please verify your email again.' })
+      } else {
+        setNotice({ tone: 'error', text: err.message || 'Something went wrong. Please try again.' })
+      }
     } finally {
       setLoading(false)
     }
@@ -143,21 +242,97 @@ export default function Auth() {
                 />
               )}
 
-              <FormField
-                id="email"
-                label="Email"
-                icon={Mail}
-                type="email"
-                inputMode="email"
-                value={values.email}
-                onChange={set('email')}
-                onBlur={blur('email')}
-                error={visibleError('email')}
-                autoComplete="email"
-                placeholder="name@example.com"
-                className="animate-fade-up"
-                style={enter(2)}
-              />
+              <div className="animate-fade-up" style={enter(2)}>
+                <FormField
+                  id="email"
+                  label="Email"
+                  icon={Mail}
+                  type="email"
+                  inputMode="email"
+                  value={values.email}
+                  onChange={onEmailChange}
+                  onBlur={blur('email')}
+                  error={visibleError('email')}
+                  autoComplete="email"
+                  placeholder="name@example.com"
+                  readOnly={mode === 'signup' && otpStage === 'verified'}
+                />
+
+                {mode === 'signup' && otpStage === 'idle' && (
+                  <div className="mt-2.5">
+                    <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                      <p className="text-xs leading-relaxed text-navy-500">We will email a 6-digit code to verify this address.</p>
+                      <button
+                        type="button"
+                        onClick={sendOtp}
+                        disabled={otpBusy === 'send'}
+                        className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-soft transition hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {otpBusy === 'send' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Send className="h-4 w-4" aria-hidden="true" />}
+                        {otpBusy === 'send' ? 'Sending…' : 'Send OTP'}
+                      </button>
+                    </div>
+                    {otpMsg && (
+                      <p role="alert" className="mt-2 text-sm font-medium text-red-600">
+                        {otpMsg.text}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {mode === 'signup' && otpStage === 'sent' && (
+                  <div className="mt-3 rounded-2xl border border-brand-100 bg-brand-50/50 p-4 shadow-soft sm:p-5">
+                    {otpMsg?.tone === 'success' && (
+                      <p role="status" className="mb-3 flex items-start gap-2 text-sm font-medium text-emerald-700">
+                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" /> {otpMsg.text}
+                      </p>
+                    )}
+                    <p className="mb-3 text-sm text-navy-600">
+                      Enter the 6-digit code sent to <span className="break-all font-semibold text-navy-800">{values.email.trim()}</span>. It expires in 5 minutes.
+                    </p>
+                    <OtpInput value={otp} onChange={setOtp} onEnter={verifyOtp} disabled={otpBusy === 'verify'} invalid={otpMsg?.tone === 'error'} autoFocus />
+                    {otpMsg?.tone === 'error' && (
+                      <p role="alert" className="mt-3 text-sm font-medium text-red-600">
+                        {otpMsg.text}
+                      </p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={verifyOtp}
+                      disabled={otp.length !== 6 || otpBusy !== ''}
+                      className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-soft transition hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {otpBusy === 'verify' && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+                      {otpBusy === 'verify' ? 'Verifying…' : 'Verify OTP'}
+                    </button>
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-sm">
+                      <button
+                        type="button"
+                        onClick={sendOtp}
+                        disabled={cooldown > 0 || otpBusy !== ''}
+                        className="inline-flex items-center gap-1.5 font-semibold text-brand-700 transition hover:underline disabled:cursor-not-allowed disabled:text-navy-400 disabled:no-underline"
+                      >
+                        {otpBusy === 'send' && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
+                        {otpBusy === 'send' ? 'Sending…' : cooldown > 0 ? `Resend OTP in ${formatCountdown(cooldown)}` : 'Resend OTP'}
+                      </button>
+                      <button type="button" onClick={resetOtp} className="font-semibold text-navy-500 transition hover:text-navy-800 hover:underline">
+                        Change email
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {mode === 'signup' && otpStage === 'verified' && (
+                  <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5">
+                    <p role="status" className="flex items-center gap-2 text-sm font-semibold text-emerald-700">
+                      <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" /> Email verified
+                    </p>
+                    <button type="button" onClick={resetOtp} className="text-xs font-semibold text-emerald-800 hover:underline">
+                      Change
+                    </button>
+                  </div>
+                )}
+              </div>
 
               {mode !== 'forgot' && (
                 <div className="animate-fade-up" style={enter(3)}>
@@ -175,7 +350,11 @@ export default function Auth() {
                     placeholder={mode === 'signup' ? 'Create a password' : 'Enter your password'}
                     labelAside={
                       mode === 'login' && (
-                        <Link to="/auth?mode=forgot" className="text-xs font-semibold text-brand-700 transition hover:text-brand-600 hover:underline">
+                        <Link
+                          to="/auth?mode=forgot"
+                          state={location.state}
+                          className="text-xs font-semibold text-brand-700 transition hover:text-brand-600 hover:underline"
+                        >
                           Forgot password?
                         </Link>
                       )
@@ -216,9 +395,17 @@ export default function Auth() {
             )}
 
             <div className="animate-fade-up" style={enter(5)}>
-              <Button type="submit" size="lg" className="mt-6 w-full !py-3.5 text-[15px]" loading={loading} iconRight={ArrowRight}>
+              <Button
+                type="submit"
+                size="lg"
+                className="mt-6 w-full !py-3.5 text-[15px]"
+                loading={loading}
+                disabled={mode === 'signup' && otpStage !== 'verified'}
+                iconRight={ArrowRight}
+              >
                 {loading ? 'Please wait…' : copy.cta}
               </Button>
+              {mode === 'signup' && otpStage !== 'verified' && <p className="mt-2 text-center text-xs text-navy-500">Verify your email to create your account.</p>}
             </div>
           </fieldset>
         </form>
@@ -251,7 +438,7 @@ export default function Auth() {
           {mode === 'login' && (
             <>
               New to ParkShare?{' '}
-              <Link to="/auth?mode=signup" className="font-semibold text-brand-700 hover:underline">
+              <Link to="/auth?mode=signup" state={location.state} className="font-semibold text-brand-700 hover:underline">
                 Create an account
               </Link>
             </>
@@ -259,13 +446,13 @@ export default function Auth() {
           {mode === 'signup' && (
             <>
               Already have an account?{' '}
-              <Link to="/auth" className="font-semibold text-brand-700 hover:underline">
+              <Link to="/auth" state={location.state} className="font-semibold text-brand-700 hover:underline">
                 Log in
               </Link>
             </>
           )}
           {mode === 'forgot' && (
-            <Link to="/auth" className="inline-flex items-center gap-1.5 font-semibold text-brand-700 hover:underline">
+            <Link to="/auth" state={location.state} className="inline-flex items-center gap-1.5 font-semibold text-brand-700 hover:underline">
               <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Back to log in
             </Link>
           )}
