@@ -1,26 +1,28 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { CalendarClock, Car, MapPin, ReceiptText } from 'lucide-react'
 import Badge from '../components/ui/Badge'
 import Button from '../components/ui/Button'
 import { getMyBookings } from '../services/api'
 import { rupees } from '../utils/format'
+import { localeOf } from '../i18n'
 
 const PHASES = {
-  active: { label: 'In progress', tone: 'green' },
-  upcoming: { label: 'Upcoming', tone: 'amber' },
-  completed: { label: 'Completed', tone: 'navy' },
-  cancelled: { label: 'Cancelled', tone: 'navy' },
+  active: { label: 'bookings.phaseActive', tone: 'green' }, // labels are translation keys
+  upcoming: { label: 'bookings.phaseUpcoming', tone: 'amber' },
+  completed: { label: 'bookings.phaseCompleted', tone: 'navy' },
+  cancelled: { label: 'bookings.phaseCancelled', tone: 'navy' },
 }
 
 const SECTIONS = [
-  { id: 'active', title: 'Active now', phases: ['active'] },
-  { id: 'upcoming', title: 'Upcoming', phases: ['upcoming'] },
-  { id: 'past', title: 'Past bookings', phases: ['completed', 'cancelled'] },
+  { id: 'active', title: 'bookings.sectionActive', phases: ['active'] },
+  { id: 'upcoming', title: 'bookings.sectionUpcoming', phases: ['upcoming'] },
+  { id: 'past', title: 'bookings.sectionPast', phases: ['completed', 'cancelled'] },
 ]
 
 const formatTime = (iso) =>
-  new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })
+  new Date(iso).toLocaleString(localeOf(), { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })
 
 function phaseOf(booking, now) {
   if (booking.status === 'cancelled') return 'cancelled'
@@ -30,6 +32,7 @@ function phaseOf(booking, now) {
 }
 
 function BookingCard({ booking, phase }) {
+  const { t } = useTranslation()
   const { label, tone } = PHASES[phase]
   const space = booking.space // missing if the space was deleted after the booking
   return (
@@ -41,7 +44,7 @@ function BookingCard({ booking, phase }) {
               {space.title}
             </Link>
           ) : (
-            <span className="font-bold text-navy-900">Removed space</span>
+            <span className="font-bold text-navy-900">{t('bookings.removedSpace')}</span>
           )}
           {space?.address && (
             <p className="mt-1 flex items-start gap-1.5 text-sm text-navy-500">
@@ -49,13 +52,13 @@ function BookingCard({ booking, phase }) {
             </p>
           )}
         </div>
-        <Badge tone={tone}>{label}</Badge>
+        <Badge tone={tone}>{t(label)}</Badge>
       </div>
 
       <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
         <div>
           <dt className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-navy-500">
-            <CalendarClock className="h-3.5 w-3.5" /> When
+            <CalendarClock className="h-3.5 w-3.5" /> {t('bookings.when')}
           </dt>
           <dd className="mt-1 font-semibold text-navy-900">
             {formatTime(booking.startTime)} → {formatTime(booking.endTime)}
@@ -63,26 +66,27 @@ function BookingCard({ booking, phase }) {
         </div>
         <div>
           <dt className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-navy-500">
-            <Car className="h-3.5 w-3.5" /> Vehicle
+            <Car className="h-3.5 w-3.5" /> {t('bookings.vehicle')}
           </dt>
           <dd className="mt-1 font-semibold text-navy-900">
-            {booking.vehicle} · {booking.hours === 24 ? 'Full day' : `${booking.hours} hr${booking.hours === 1 ? '' : 's'}`}
+            {t(`vehicles.${booking.vehicle}`, booking.vehicle)} · {booking.hours === 24 ? t('time.fullDay') : t('time.hours', { count: booking.hours })}
           </dd>
         </div>
         <div>
           <dt className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-navy-500">
-            <ReceiptText className="h-3.5 w-3.5" /> Total
+            <ReceiptText className="h-3.5 w-3.5" /> {t('bookings.total')}
           </dt>
           <dd className="mt-1 font-semibold text-navy-900">{rupees(booking.total)}</dd>
         </div>
       </dl>
 
-      <p className="mt-4 text-xs text-navy-400">Booking ID {booking.id}</p>
+      <p className="mt-4 text-xs text-navy-400">{t('bookings.bookingId', { id: booking.id })}</p>
     </li>
   )
 }
 
 function Sections({ bookings, now }) {
+  const { t } = useTranslation()
   const withPhase = useMemo(() => bookings.map((b) => ({ booking: b, phase: phaseOf(b, now) })), [bookings, now])
 
   return SECTIONS.map((section) => {
@@ -97,7 +101,7 @@ function Sections({ bookings, now }) {
     return (
       <section key={section.id} className="mt-8 first:mt-0">
         <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-navy-500">
-          {section.title} <span className="text-navy-400">({items.length})</span>
+          {t(section.title)} <span className="text-navy-400">({items.length})</span>
         </h2>
         <ul className="space-y-3">
           {items.map(({ booking, phase }) => (
@@ -110,6 +114,7 @@ function Sections({ bookings, now }) {
 }
 
 export default function MyBookings() {
+  const { t } = useTranslation()
   const [bookings, setBookings] = useState(null) // null = still loading
   const [error, setError] = useState('')
 
@@ -117,7 +122,7 @@ export default function MyBookings() {
     let alive = true
     getMyBookings()
       .then((list) => alive && setBookings(list))
-      .catch((err) => alive && setError(err.message || 'Could not load your bookings. Please try again.'))
+      .catch((err) => alive && setError(err.message || t('bookings.loadError')))
     return () => {
       alive = false
     }
@@ -126,9 +131,9 @@ export default function MyBookings() {
   return (
     <div className="container-page max-w-3xl py-10">
       <div className="mb-6 flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-extrabold">My bookings</h1>
+        <h1 className="text-2xl font-extrabold">{t('bookings.title')}</h1>
         <Button to="/find" variant="secondary" size="sm">
-          Find parking
+          {t('bookings.findParking')}
         </Button>
       </div>
 
@@ -139,7 +144,7 @@ export default function MyBookings() {
       )}
 
       {!error && bookings === null && (
-        <div className="animate-pulse space-y-3" aria-label="Loading your bookings">
+        <div className="animate-pulse space-y-3" aria-label={t('bookings.loading')}>
           <div className="card h-32" />
           <div className="card h-32" />
         </div>
@@ -150,10 +155,10 @@ export default function MyBookings() {
           <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-brand-50 text-brand-700">
             <Car className="h-7 w-7" />
           </span>
-          <h2 className="mt-4 text-lg font-bold">No bookings yet</h2>
-          <p className="mt-1 text-sm text-navy-500">When you book a parking space, it will show up here.</p>
+          <h2 className="mt-4 text-lg font-bold">{t('bookings.emptyTitle')}</h2>
+          <p className="mt-1 text-sm text-navy-500">{t('bookings.emptyText')}</p>
           <Button to="/find" className="mt-6">
-            Find parking
+            {t('bookings.findParking')}
           </Button>
         </div>
       )}

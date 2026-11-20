@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { Trans, useTranslation } from 'react-i18next'
 import { ArrowRight, ArrowLeft, Car, Check, CheckCircle2, Eye, EyeOff, Globe, Home, Loader2, Lock, Mail, Send, User } from 'lucide-react'
 import AuthShell from '../components/auth/AuthShell'
 import FormField from '../components/auth/FormField'
@@ -11,12 +12,6 @@ import { homeFor, useAuth } from '../context/AuthContext'
 import { login, register, requestPasswordReset, sendSignupOtp, verifySignupOtp } from '../services/api'
 import { validateEmail, validateName, validatePassword } from '../utils/validation'
 
-const COPY = {
-  login: { title: 'Welcome back', text: 'Log in to continue.', cta: 'Log in' },
-  signup: { title: 'Create your account', text: 'Start parking smarter in a minute.', cta: 'Create account' },
-  forgot: { title: 'Reset your password', text: "Enter your email and we'll send you reset instructions.", cta: 'Send reset link' },
-}
-
 const FIELDS = { login: ['email', 'password'], signup: ['name', 'email', 'password'], forgot: ['email'] }
 
 // Staggered entrance; the global reduced-motion rule neutralises it for users who opt out.
@@ -25,6 +20,7 @@ const enter = (i) => ({ animationDelay: `${80 + i * 60}ms` })
 const formatCountdown = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
 export default function Auth() {
+  const { t } = useTranslation()
   const [params] = useSearchParams()
   const requested = params.get('mode')
   const mode = requested === 'signup' || requested === 'forgot' ? requested : 'login'
@@ -117,13 +113,13 @@ export default function Auth() {
       setOtp('')
       setOtpStage('sent')
       setCooldown(Number(res?.resendAfter) || 45)
-      setOtpMsg({ tone: 'success', text: res?.message || 'OTP sent successfully to your email.' })
+      setOtpMsg({ tone: 'success', text: t('otp.sent') })
     } catch (err) {
       if (run !== otpRun.current) return
       // "Please wait 23 seconds..." -> keep the visible timer in step with the server.
-      const wait = Number(/wait (\d+) second/i.exec(err.message || '')?.[1])
+      const wait = Number(/wait (\d+) second/i.exec(err.raw || '')?.[1]) // err.raw = the server's original English text
       if (wait) setCooldown(wait)
-      setOtpMsg({ tone: 'error', text: err.message || 'Could not send the OTP. Please try again.' })
+      setOtpMsg({ tone: 'error', text: err.message || t('otp.sendFail') })
     } finally {
       if (run === otpRun.current) setOtpBusy('')
     }
@@ -143,7 +139,7 @@ export default function Auth() {
       setNotice(null)
     } catch (err) {
       if (run !== otpRun.current) return
-      setOtpMsg({ tone: 'error', text: err.message || 'Could not verify the OTP. Please try again.' })
+      setOtpMsg({ tone: 'error', text: err.message || t('otp.verifyFail') })
       setOtp('')
       document.getElementById('otp-0')?.focus()
     } finally {
@@ -158,12 +154,12 @@ export default function Auth() {
 
     const firstInvalid = FIELDS[mode].find((f) => errors[f])
     if (firstInvalid) {
-      setNotice({ tone: 'error', text: 'Please fix the highlighted fields and try again.' })
+      setNotice({ tone: 'error', text: t('auth.fixFields') })
       document.getElementById(firstInvalid)?.focus()
       return
     }
     if (mode === 'signup' && (otpStage !== 'verified' || !verificationToken)) {
-      setNotice({ tone: 'error', text: 'Please verify your email with the OTP before creating your account.' })
+      setNotice({ tone: 'error', text: t('auth.verifyFirst') })
       return
     }
 
@@ -172,7 +168,7 @@ export default function Auth() {
     try {
       if (mode === 'forgot') {
         const res = await requestPasswordReset({ email })
-        setNotice({ tone: 'info', text: res?.message || 'If an account exists for that email, reset instructions will be sent.' })
+        setNotice({ tone: 'info', text: t('auth.resetSent') })
         return
       }
       const result =
@@ -185,16 +181,16 @@ export default function Auth() {
       // 403 on signup: the server no longer accepts the email verification (expired or already used).
       if (mode === 'signup' && err.status === 403) {
         resetOtp()
-        setNotice({ tone: 'error', text: err.message || 'Please verify your email again.' })
+        setNotice({ tone: 'error', text: err.message || t('otp.verifyFail') })
       } else {
-        setNotice({ tone: 'error', text: err.message || 'Something went wrong. Please try again.' })
+        setNotice({ tone: 'error', text: err.message || t('common.somethingWrong') })
       }
     } finally {
       setLoading(false)
     }
   }
 
-  const copy = COPY[mode]
+  const copy = { title: t(`auth.${mode}.title`), text: t(`auth.${mode}.text`), cta: t(`auth.${mode}.cta`) }
 
   return (
     <AuthShell>
@@ -209,11 +205,11 @@ export default function Auth() {
             <div className="space-y-5">
               {mode === 'signup' && (
                 <fieldset className="animate-fade-up" style={enter(1)}>
-                  <legend className="mb-1.5 text-sm font-semibold text-navy-800">I want to</legend>
+                  <legend className="mb-1.5 text-sm font-semibold text-navy-800">{t('auth.iWantTo')}</legend>
                   <div className="grid grid-cols-2 gap-3">
                     {[
-                      ['driver', 'Find parking', Car],
-                      ['owner', 'List my space', Home],
+                      ['driver', t('auth.roleFind'), Car],
+                      ['owner', t('auth.roleList'), Home],
                     ].map(([id, label, Icon]) => (
                       <label key={id} className="cursor-pointer">
                         <input type="radio" name="role" value={id} checked={values.role === id} onChange={set('role')} className="peer sr-only" />
@@ -229,14 +225,14 @@ export default function Auth() {
               {mode === 'signup' && (
                 <FormField
                   id="name"
-                  label="Full name"
+                  label={t('auth.fullName')}
                   icon={User}
                   value={values.name}
                   onChange={set('name')}
                   onBlur={blur('name')}
                   error={visibleError('name')}
                   autoComplete="name"
-                  placeholder="Your full name"
+                  placeholder={t('auth.fullNamePlaceholder')}
                   className="animate-fade-up"
                   style={enter(2)}
                 />
@@ -245,7 +241,7 @@ export default function Auth() {
               <div className="animate-fade-up" style={enter(2)}>
                 <FormField
                   id="email"
-                  label="Email"
+                  label={t('auth.email')}
                   icon={Mail}
                   type="email"
                   inputMode="email"
@@ -254,14 +250,14 @@ export default function Auth() {
                   onBlur={blur('email')}
                   error={visibleError('email')}
                   autoComplete="email"
-                  placeholder="name@example.com"
+                  placeholder={t('auth.emailPlaceholder')}
                   readOnly={mode === 'signup' && otpStage === 'verified'}
                 />
 
                 {mode === 'signup' && otpStage === 'idle' && (
                   <div className="mt-2.5">
                     <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                      <p className="text-xs leading-relaxed text-navy-500">We will email a 6-digit code to verify this address.</p>
+                      <p className="text-xs leading-relaxed text-navy-500">{t('otp.hint')}</p>
                       <button
                         type="button"
                         onClick={sendOtp}
@@ -269,7 +265,7 @@ export default function Auth() {
                         className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-soft transition hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70"
                       >
                         {otpBusy === 'send' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Send className="h-4 w-4" aria-hidden="true" />}
-                        {otpBusy === 'send' ? 'Sending…' : 'Send OTP'}
+                        {otpBusy === 'send' ? t('otp.sending') : t('otp.send')}
                       </button>
                     </div>
                     {otpMsg && (
@@ -288,7 +284,7 @@ export default function Auth() {
                       </p>
                     )}
                     <p className="mb-3 text-sm text-navy-600">
-                      Enter the 6-digit code sent to <span className="break-all font-semibold text-navy-800">{values.email.trim()}</span>. It expires in 5 minutes.
+                      <Trans i18nKey="otp.enterCode" values={{ email: values.email.trim() }} components={{ b: <span className="break-all font-semibold text-navy-800" /> }} />
                     </p>
                     <OtpInput value={otp} onChange={setOtp} onEnter={verifyOtp} disabled={otpBusy === 'verify'} invalid={otpMsg?.tone === 'error'} autoFocus />
                     {otpMsg?.tone === 'error' && (
@@ -303,7 +299,7 @@ export default function Auth() {
                       className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-soft transition hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {otpBusy === 'verify' && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
-                      {otpBusy === 'verify' ? 'Verifying…' : 'Verify OTP'}
+                      {otpBusy === 'verify' ? t('otp.verifying') : t('otp.verify')}
                     </button>
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-sm">
                       <button
@@ -313,10 +309,10 @@ export default function Auth() {
                         className="inline-flex items-center gap-1.5 font-semibold text-brand-700 transition hover:underline disabled:cursor-not-allowed disabled:text-navy-400 disabled:no-underline"
                       >
                         {otpBusy === 'send' && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
-                        {otpBusy === 'send' ? 'Sending…' : cooldown > 0 ? `Resend OTP in ${formatCountdown(cooldown)}` : 'Resend OTP'}
+                        {otpBusy === 'send' ? t('otp.sending') : cooldown > 0 ? t('otp.resendIn', { time: formatCountdown(cooldown) }) : t('otp.resend')}
                       </button>
                       <button type="button" onClick={resetOtp} className="font-semibold text-navy-500 transition hover:text-navy-800 hover:underline">
-                        Change email
+                        {t('otp.changeEmail')}
                       </button>
                     </div>
                   </div>
@@ -325,10 +321,10 @@ export default function Auth() {
                 {mode === 'signup' && otpStage === 'verified' && (
                   <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5">
                     <p role="status" className="flex items-center gap-2 text-sm font-semibold text-emerald-700">
-                      <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" /> Email verified
+                      <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" /> {t('otp.verified')}
                     </p>
                     <button type="button" onClick={resetOtp} className="text-xs font-semibold text-emerald-800 hover:underline">
-                      Change
+                      {t('otp.change')}
                     </button>
                   </div>
                 )}
@@ -338,16 +334,16 @@ export default function Auth() {
                 <div className="animate-fade-up" style={enter(3)}>
                   <FormField
                     id="password"
-                    label="Password"
+                    label={t('auth.password')}
                     icon={Lock}
                     type={showPassword ? 'text' : 'password'}
                     value={values.password}
                     onChange={set('password')}
                     onBlur={blur('password')}
                     error={visibleError('password')}
-                    hint={mode === 'signup' ? 'At least 8 characters. Mix letters, numbers and symbols for a stronger password.' : undefined}
+                    hint={mode === 'signup' ? t('auth.passwordHint') : undefined}
                     autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-                    placeholder={mode === 'signup' ? 'Create a password' : 'Enter your password'}
+                    placeholder={mode === 'signup' ? t('auth.passwordPlaceholderNew') : t('auth.passwordPlaceholderLogin')}
                     labelAside={
                       mode === 'login' && (
                         <Link
@@ -355,7 +351,7 @@ export default function Auth() {
                           state={location.state}
                           className="text-xs font-semibold text-brand-700 transition hover:text-brand-600 hover:underline"
                         >
-                          Forgot password?
+                          {t('auth.forgotLink')}
                         </Link>
                       )
                     }
@@ -363,7 +359,7 @@ export default function Auth() {
                       <button
                         type="button"
                         onClick={() => setShowPassword((s) => !s)}
-                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                        aria-label={showPassword ? t('auth.hidePassword') : t('auth.showPassword')}
                         aria-pressed={showPassword}
                         className="rounded-lg p-2 text-navy-400 transition hover:bg-navy-50 hover:text-navy-700"
                       >
@@ -381,7 +377,7 @@ export default function Auth() {
                   <span className="flex h-5 w-5 items-center justify-center rounded-md border border-navy-300 bg-white transition peer-checked:border-brand-600 peer-checked:bg-brand-600 peer-focus-visible:ring-2 peer-focus-visible:ring-brand-500 peer-focus-visible:ring-offset-2 [&>svg]:opacity-0 peer-checked:[&>svg]:opacity-100">
                     <Check className="h-3.5 w-3.5 text-white" aria-hidden="true" />
                   </span>
-                  Remember me
+                  {t('auth.rememberMe')}
                 </label>
               )}
             </div>
@@ -403,18 +399,18 @@ export default function Auth() {
                 disabled={mode === 'signup' && otpStage !== 'verified'}
                 iconRight={ArrowRight}
               >
-                {loading ? 'Please wait…' : copy.cta}
+                {loading ? t('common.pleaseWait') : copy.cta}
               </Button>
-              {mode === 'signup' && otpStage !== 'verified' && <p className="mt-2 text-center text-xs text-navy-500">Verify your email to create your account.</p>}
+              {mode === 'signup' && otpStage !== 'verified' && <p className="mt-2 text-center text-xs text-navy-500">{t('auth.verifyToCreate')}</p>}
             </div>
           </fieldset>
         </form>
 
         {mode !== 'forgot' && (
           <div className="animate-fade-up" style={enter(6)}>
-            <div className="my-6 flex items-center gap-4" role="separator" aria-label="or">
+            <div className="my-6 flex items-center gap-4" role="separator" aria-label={t('auth.orContinueWith')}>
               <span className="h-px flex-1 bg-navy-100" />
-              <span className="text-xs font-medium uppercase tracking-wider text-navy-400">or continue with</span>
+              <span className="text-xs font-medium uppercase tracking-wider text-navy-400">{t('auth.orContinueWith')}</span>
               <span className="h-px flex-1 bg-navy-100" />
             </div>
             <button
@@ -422,14 +418,14 @@ export default function Auth() {
               onClick={() =>
                 setNotice({
                   tone: 'info',
-                  title: 'Google sign-in is not connected yet',
-                  text: 'It will be enabled together with the authentication API.',
+                  title: t('auth.googleTitle'),
+                  text: t('auth.googleText'),
                 })
               }
               className="flex w-full items-center justify-center gap-2.5 rounded-xl border border-navy-200 bg-white px-4 py-3 text-sm font-semibold text-navy-800 shadow-soft transition duration-200 hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-card"
             >
               <Globe className="h-[18px] w-[18px] text-brand-600" aria-hidden="true" />
-              Continue with Google
+              {t('auth.google')}
             </button>
           </div>
         )}
@@ -437,23 +433,23 @@ export default function Auth() {
         <p className="animate-fade-up mt-7 text-center text-sm text-navy-500" style={enter(7)}>
           {mode === 'login' && (
             <>
-              New to ParkShare?{' '}
+              {t('auth.newHere')}{' '}
               <Link to="/auth?mode=signup" state={location.state} className="font-semibold text-brand-700 hover:underline">
-                Create an account
+                {t('auth.createLink')}
               </Link>
             </>
           )}
           {mode === 'signup' && (
             <>
-              Already have an account?{' '}
+              {t('auth.haveAccount')}{' '}
               <Link to="/auth" state={location.state} className="font-semibold text-brand-700 hover:underline">
-                Log in
+                {t('auth.loginLink')}
               </Link>
             </>
           )}
           {mode === 'forgot' && (
             <Link to="/auth" state={location.state} className="inline-flex items-center gap-1.5 font-semibold text-brand-700 hover:underline">
-              <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Back to log in
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" /> {t('auth.backToLogin')}
             </Link>
           )}
         </p>

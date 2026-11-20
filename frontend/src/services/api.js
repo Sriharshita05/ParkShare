@@ -5,6 +5,8 @@
 
 import { spaces, ownerStats, earningsSeries, ownerListings, ownerBookings, reviews } from '../data/mockData'
 import { getToken } from '../utils/session'
+import i18n from '../i18n'
+import { localizeServerMessage } from '../i18n/serverMessages'
 
 const USE_MOCK = false
 // Must include the /api part, e.g. VITE_API_URL=https://parkshare-backend.onrender.com/api
@@ -27,24 +29,27 @@ async function request(path, options = {}) {
   }
   if (!res.ok) {
     // The API returns { detail: "..." } for errors.
+    // The message is shown in the visitor's language; `raw` keeps the server's original English text.
     const body = await res.json().catch(() => null)
-    throw new ApiError(typeof body?.detail === 'string' ? body.detail : `Request failed (${res.status}).`, res.status)
+    const raw = typeof body?.detail === 'string' ? body.detail : ''
+    throw new ApiError(raw ? localizeServerMessage(raw) : i18n.t('server.requestFailed', { status: res.status }), res.status, raw)
   }
   return res.json()
 }
 
 export class ApiError extends Error {
-  constructor(message, status) {
+  constructor(message, status, raw = '') {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.raw = raw
   }
 }
 
 // Thrown when the server cannot be reached at all (not running, wrong URL, CORS, offline).
 export class NetworkError extends Error {
   constructor() {
-    super('Cannot reach the ParkShare server. Make sure the backend is running and try again.')
+    super(i18n.t('server.network'))
     this.name = 'NetworkError'
   }
 }

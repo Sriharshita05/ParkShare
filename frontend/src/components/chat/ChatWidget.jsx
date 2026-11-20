@@ -1,21 +1,17 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 // Reads the backend address from Vite env (set VITE_API_URL in frontend/.env).
 // Falls back to the local backend. Strip any trailing slash.
 const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:5000").replace(/\/$/, "");
 
-const WELCOME = {
-  role: "assistant",
-  content: "Hi! I'm the ParkShare assistant. Ask me about finding parking, booking, or listing your space.",
-};
+// The welcome message is a placeholder entry; it is rendered (and translated) from t('chat.welcome').
+const WELCOME = { role: "assistant", welcome: true, content: "" };
 
-const SUGGESTIONS = [
-  "How do I book a parking space?",
-  "How can I list my space as an owner?",
-  "How do payments work?",
-];
+const SUGGESTION_KEYS = ["chat.suggestion1", "chat.suggestion2", "chat.suggestion3"];
 
 export default function ChatWidget() {
+  const { t, i18n } = useTranslation();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -45,17 +41,17 @@ export default function ChatWidget() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // Do not send the welcome message as history; it is UI-only.
-        body: JSON.stringify({ messages: next.filter((m) => m !== WELCOME) }),
+        body: JSON.stringify({ messages: next.filter((m) => m !== WELCOME), language: i18n.language }),
       });
       const data = await res.json().catch(() => ({}));
       const reply = res.ok
         ? data.reply
-        : data.error || "Something went wrong. Please try again.";
+        : data.error || t("chat.genericError");
       setMessages([...next, { role: "assistant", content: reply }]);
     } catch {
       setMessages([
         ...next,
-        { role: "assistant", content: "I couldn't reach the server. Please check your connection and try again." },
+        { role: "assistant", content: t("chat.networkError") },
       ]);
     } finally {
       setLoading(false);
@@ -74,18 +70,18 @@ export default function ChatWidget() {
       {open && (
         <div
           role="dialog"
-          aria-label="ParkShare assistant"
+          aria-label={t("chat.dialog")}
           className="mb-3 flex h-[32rem] max-h-[calc(100vh-7rem)] w-[22rem] max-w-[calc(100vw-2.5rem)] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200"
         >
           <div className="flex items-center justify-between bg-gradient-to-r from-blue-700 to-blue-500 px-4 py-3 text-white">
             <div>
-              <p className="text-sm font-semibold leading-tight">ParkShare Assistant</p>
-              <p className="text-xs text-blue-100">Ask me anything about parking</p>
+              <p className="text-sm font-semibold leading-tight">{t("chat.title")}</p>
+              <p className="text-xs text-blue-100">{t("chat.subtitle")}</p>
             </div>
             <button
               type="button"
               onClick={() => setOpen(false)}
-              aria-label="Close chat"
+              aria-label={t("chat.close")}
               className="rounded-lg p-1 text-xl leading-none text-white/90 hover:bg-white/10"
             >
               ×
@@ -103,21 +99,21 @@ export default function ChatWidget() {
                       : "rounded-bl-md bg-white text-slate-800 shadow-sm ring-1 ring-slate-200")
                   }
                 >
-                  {m.content}
+                  {m.welcome ? t("chat.welcome") : m.content}
                 </div>
               </div>
             ))}
 
             {showSuggestions && (
               <div className="flex flex-wrap gap-2 pt-1">
-                {SUGGESTIONS.map((s) => (
+                {SUGGESTION_KEYS.map((key) => (
                   <button
-                    key={s}
+                    key={key}
                     type="button"
-                    onClick={() => sendMessage(s)}
+                    onClick={() => sendMessage(t(key))}
                     className="rounded-full border border-blue-200 bg-white px-3 py-1 text-xs text-blue-700 hover:bg-blue-50"
                   >
-                    {s}
+                    {t(key)}
                   </button>
                 ))}
               </div>
@@ -126,7 +122,7 @@ export default function ChatWidget() {
             {loading && (
               <div className="flex justify-start">
                 <div className="rounded-2xl rounded-bl-md bg-white px-3 py-2 text-slate-400 shadow-sm ring-1 ring-slate-200">
-                  Typing…
+                  {t("chat.typing")}
                 </div>
               </div>
             )}
@@ -139,7 +135,7 @@ export default function ChatWidget() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               maxLength={1000}
-              placeholder="Type your question…"
+              placeholder={t("chat.placeholder")}
               className="flex-1 rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
             />
             <button
@@ -147,7 +143,7 @@ export default function ChatWidget() {
               disabled={loading || !input.trim()}
               className="rounded-xl bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Send
+              {t("chat.send")}
             </button>
           </form>
         </div>
@@ -156,7 +152,7 @@ export default function ChatWidget() {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        aria-label={open ? "Close chat" : "Open chat"}
+        aria-label={open ? t("chat.close") : t("chat.open")}
         className="flex h-14 w-14 items-center justify-center rounded-full bg-blue-600 text-2xl text-white shadow-lg transition hover:scale-105 hover:bg-blue-700"
       >
         {open ? "×" : "💬"}

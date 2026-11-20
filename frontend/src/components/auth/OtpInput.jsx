@@ -1,8 +1,10 @@
 import { useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 
 // Six-box one-time-code input. `value` is a string of digits ("4821"); `onChange` receives the new string.
 // Supports typing, backspace/delete, arrow keys, pasting a whole code, and SMS autofill.
 export default function OtpInput({ value, onChange, onEnter, length = 6, disabled = false, invalid = false, autoFocus = false, idPrefix = 'otp' }) {
+  const { t } = useTranslation()
   const refs = useRef([])
   const digits = Array.from({ length }, (_, i) => value[i] || '')
 
@@ -63,7 +65,7 @@ export default function OtpInput({ value, onChange, onEnter, length = 6, disable
   }
 
   return (
-    <div role="group" aria-label="One-time password" className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: `repeat(${length}, minmax(0, 1fr))` }}>
+    <div role="group" aria-label={t('otp.group')} className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: `repeat(${length}, minmax(0, 1fr))` }}>
       {digits.map((digit, i) => (
         <input
           key={i}
@@ -80,7 +82,7 @@ export default function OtpInput({ value, onChange, onEnter, length = 6, disable
           inputMode="numeric"
           pattern="[0-9]*"
           autoComplete={i === 0 ? 'one-time-code' : 'off'}
-          aria-label={`Digit ${i + 1} of ${length}`}
+          aria-label={t('otp.digit', { n: i + 1, total: length })}
           aria-invalid={invalid || undefined}
           className={`h-12 w-full min-w-0 rounded-xl border bg-white text-center text-lg font-bold text-navy-900 outline-none transition focus:ring-2 disabled:cursor-not-allowed disabled:opacity-60 sm:h-14 sm:text-xl ${
             invalid
