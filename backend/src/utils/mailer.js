@@ -1,27 +1,19 @@
-import nodemailer from 'nodemailer'
+// Sends OTP emails through Brevo's HTTPS API. Render's free tier blocks SMTP ports,
+// so this uses a normal HTTPS request instead of nodemailer.
+// Needs BREVO_API_KEY and MAIL_FROM (a sender verified in Brevo) in backend/.env or Render's Environment page.
 
-// SMTP settings come from backend/.env (read at call time, so they are always the loaded values).
-export const mailConfigured = () => Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS)
+const BREVO_URL = 'https://api.brevo.com/v3/smtp/email'
 
-let transporter = null
-function getTransporter() {
-  if (!transporter) {
-    const port = Number(process.env.SMTP_PORT || 465)
-    transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port,
-      secure: process.env.SMTP_SECURE ? process.env.SMTP_SECURE === 'true' : port === 465,
-      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-      connectionTimeout: 10_000,
-      greetingTimeout: 10_000,
-      socketTimeout: 15_000,
-    })
-  }
-  return transporter
+export const mailConfigured = () => Boolean(process.env.BREVO_API_KEY && process.env.MAIL_FROM)
+
+// MAIL_FROM can be "you@gmail.com" or "ParkShare <you@gmail.com>".
+function parseSender(value) {
+  const match = /^\s*(.*?)\s*<([^>]+)>\s*$/.exec(value)
+  if (match) return { name: match[1] || 'ParkShare', email: match[2].trim() }
+  return { name: 'ParkShare', email: value.trim() }
 }
 
 export async function sendOtpEmail(to, otp) {
-  const from = process.env.MAIL_FROM || `ParkShare <${process.env.SMTP_USER}>`
   const text = [
     `Your ParkShare verification code is ${otp}.`,
     '',
@@ -41,5 +33,25 @@ export async function sendOtpEmail(to, otp) {
     </div>
   </div>`
 
-  await getTransporter().sendMail({ from, to, subject: 'Your ParkShare verification code', text, html })
+  const response = await fetch(BREVO_URL, {
+    method: 'POST',
+    headers: {
+      'api-key': process.env.BREVO_API_KEY,
+      'content-type': 'application/json',
+      accept: 'application/json',
+    },
+    body: JSON.stringify({
+      sender: parseSender(process.env.MAIL_FROM),
+      to: [{ email: to }],
+      subject: 'Your ParkShare verification code',
+      textContent: text,
+      htmlContent: html,
+    }),
+    signal: AbortSignal.timeout(15_000),
+  })
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new Error(`Brevo ${response.status}: ${body.message || response.statusText}`)
+  }
 }
